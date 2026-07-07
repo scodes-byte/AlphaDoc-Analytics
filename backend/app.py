@@ -162,7 +162,11 @@ async def chat_with_document(chat: ChatMessage):
                     
     return {"response": response}
 
+# Mount frontend files to serve the dashboard UI at the root path /
+frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
+app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+
 if __name__ == "__main__":
     import uvicorn
-    # Serves API locally on port 8000 when executed directly
+    # Serves API and UI locally on port 8000 when executed directly
     uvicorn.run(app, host="127.0.0.1", port=8000)

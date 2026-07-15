@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from pipeline.document_processor import DocumentProcessor
 from pipeline.llm_extractor import LLMExtractor
 from pipeline.analytics import AnalyticsEngine
+from pipeline.agents import OrchestratorAgent
 
 load_dotenv()
 
@@ -37,6 +38,9 @@ document_store = {
 
 class ChatMessage(BaseModel):
     message: str
+
+# Instantiate Multi-Agent Orchestrator
+orchestrator = OrchestratorAgent()
 
 @app.post("/api/upload")
 async def upload_document(file: UploadFile = File(...)):
@@ -116,51 +120,23 @@ async def load_demo_data():
 @app.post("/api/chat")
 async def chat_with_document(chat: ChatMessage):
     """
-    Simulates a contextual conversational financial agent that answers user 
-    questions based on the current document analysis cache.
+    Coordinates specialized financial agents (Orchestrator, KPI, Risk, Sentiment)
+    to perform multi-agent analysis and return the synthesized response alongside thought traces.
     """
     analysis = document_store["current_analysis"]
     if not analysis:
-        return {"response": "Please upload a financial document or click 'Load Demo Data' before starting the chat."}
+        return {
+            "response": "Please upload a financial document or click 'Load Demo Data' before starting the chat.",
+            "thought_log": []
+        }
         
-    query = chat.message.lower()
-    company = analysis["company_name"]
-    
-    # 1. Perform intent classification and synthesis
-    if "revenue" in query:
-        hist_rev = ", ".join([f"{item['period']}: ${item['revenue']}M" for item in analysis["historical"]])
-        fc_rev = analysis["forecasts"]["revenue"]["predicted"]
-        trend = "increasing" if analysis["forecasts"]["revenue"]["trend_slope"] > 0 else "decreasing"
-        
-        response = (f"According to the financial records for **{company}**, "
-                    f"the historical revenue series shows: {hist_rev}. "
-                    f"Our predictive data science model forecasts the next quarter (**{analysis['next_period']}**) "
-                    f"revenue to be **${fc_rev}M** (with a {trend} trend slope of {analysis['forecasts']['revenue']['trend_slope']}).")
-                    
-    elif "risk" in query or "headwind" in query or "challenge" in query:
-        risk_list = "\n".join([f"- {risk}" for risk in analysis["risks"]])
-        response = f"Here are the core operational risk factors extracted by our risk analysis agent for **{company}**:\n\n{risk_list}"
-        
-    elif "sentiment" in query or "opinion" in query or "ceo" in query:
-        sentiment_info = analysis["sentiment"]
-        response = (f"The narrative sentiment classification is **{sentiment_info['classification']}** "
-                    f"(with a quantitative score of **{sentiment_info['score']}** on a [-1, 1] scale).\n\n"
-                    f"**CEO Perspective Summary:** {sentiment_info['ceo_statement_summary']}")
-                    
-    elif "net income" in query or "profit" in query:
-        hist_profit = ", ".join([f"{item['period']}: ${item['net_income']}M" for item in analysis["historical"]])
-        fc_profit = analysis["forecasts"]["net_income"]["predicted"]
-        response = (f"Historical net income metrics for **{company}**: {hist_profit}.\n\n"
-                    f"The predictive regression model projects a net income of **${fc_profit}M** for **{analysis['next_period']}**.")
-                    
-    else:
-        # Default agent response aggregating main metrics
-        response = (f"I am the financial intelligence agent for **{company}** ({analysis['financial_year']}).\n"
-                    f"Currently, I have cached quarterly historical metrics for {len(analysis['historical'])} periods. "
-                    f"I can assist with detailed queries about: **Revenue growth**, **Net Income projections**, **Operating Margins**, "
-                    f"or the CEO's **Risk & Sentiment factors**. What would you like to explore?")
-                    
-    return {"response": response}
+    try:
+        response, thought_log = orchestrator.coordinate(chat.message, analysis)
+        return {"response": response, "thought_log": thought_log}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Multi-agent reasoning failed: {str(e)}")
 
 # Mount frontend files to serve the dashboard UI at the root path /
 frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")

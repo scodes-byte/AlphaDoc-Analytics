@@ -149,7 +149,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 body: JSON.stringify({ message: query })
             });
             const data = await response.json();
-            addSystemChatMessage(data.response);
+            addSystemChatMessage(data.response, data.thought_log);
         } catch (error) {
             addSystemChatMessage("Failed to retrieve query response. Verify server status.");
         } finally {
@@ -170,11 +170,23 @@ document.addEventListener("DOMContentLoaded", () => {
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
-    function addSystemChatMessage(text) {
+    function addSystemChatMessage(text, thoughtLog = null) {
         const msgDiv = document.createElement("div");
         msgDiv.className = "message system-message";
+        
+        let thoughtHTML = "";
+        if (thoughtLog && thoughtLog.length > 0) {
+            thoughtHTML = `
+                <details class="thought-trace">
+                    <summary>🛠️ View Agent Thought Trace (${thoughtLog.length} steps)</summary>
+                    <pre class="thought-log-pre">${escapeHTML(thoughtLog.join("\n"))}</pre>
+                </details>
+            `;
+        }
+
         msgDiv.innerHTML = `
-            <span class="message-sender">Agent</span>
+            <span class="message-sender">Agent Network</span>
+            ${thoughtHTML}
             <div class="message-text">${formatMarkdown(text)}</div>
         `;
         chatMessages.appendChild(msgDiv);

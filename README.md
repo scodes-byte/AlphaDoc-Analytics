@@ -1,19 +1,25 @@
 # AlphaDoc-Analytics Platform 📊
 
-An advanced Generative AI and Data Science platform that parses unstructured financial PDF reports, extracts key performance indicators (KPIs) via a multi-agent pipeline, runs statistical predictive models, and renders findings on a premium glassmorphism dashboard.
+An enterprise-grade **Multimodal Generative AI & Financial Analytics Platform** that ingests unstructured financial collateral (PDFs, scanned balance sheets, visual charts, earnings disclosures), extracts key performance indicators (KPIs) using an autonomous **Multi-Agent Architecture**, executes predictive regression modeling, and renders real-time insights on an interactive glassmorphism dashboard.
 
 [![Python Version](https://img.shields.ly/badge/python-3.11-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.ly/badge/FastAPI-0.100.0-emerald.svg)](https://fastapi.tiangolo.com/)
+[![Gemini Multimodal VLM](https://img.shields.ly/badge/GenAI-Gemini%201.5%20Pro%2FFlash-orange.svg)](https://deepmind.google/technologies/gemini/)
 [![License](https://img.shields.ly/badge/license-MIT-purple.svg)](LICENSE)
 
 ---
 
-## 🔍 Overview & Features
-* **Multi-Agent Ingestion Pipeline:** Uses isolated Parser, Risk, and Sentiment LLM agents powered by the **Google Gemini API** to structure quantitative and narrative data from raw PDFs.
-* **Predictive Data Science Engine:** Computes Quarter-over-Quarter (QoQ) growth and fits Ordinary Least Squares (OLS) Linear Regression models to forecast upcoming revenue and earnings trends with 95% Confidence Intervals.
-* **Premium Glassmorphism Dashboard:** Interactive visual layout built with vanilla HTML5, CSS3, and JavaScript. Displays KPI growth trends, risk metrics, and forecasted indicators utilizing dual-axis charts via **Chart.js**.
-* **Contextual Chat Agent:** Includes a conversational interface enabling users to query processed reports and trends dynamically.
-* **Academic Research Paper:** Includes a complete formal research paper titled *"A Multi-Agent Framework for Structured KPI Extraction and Quantitative Trend Forecasting from Unstructured Financial Reports"* (located in `docs/`).
+## 🔍 Key Capabilities & Multimodal Architecture
+
+* **Multimodal Document & Vision Ingestion:** Leverages Gemini Vision-Language Models (VLMs) alongside text extractors to process scanned balance sheets, multi-column tables, visual charts, and embedded infographics with zero OCR data loss.
+* **Autonomous Multi-Agent Pipeline:**
+  * 👁️ **Multimodal Vision & Parser Agent:** Extracts quantitative metrics, revenue breakdowns, margins, and EPS from tables and images into schema-validated JSON.
+  * ⚖️ **Risk & Compliance Agent:** Identifies qualitative market headwinds, supply chain vulnerabilities, and macroeconomic risk factors.
+  * 📊 **Sentiment & Executive Intelligence Agent:** Analyzes management discussion & analysis (MD&A) notes to calculate executive sentiment metrics.
+* **Predictive Data Science Engine:** Calculates Quarter-over-Quarter (QoQ) metric momentum and fits Ordinary Least Squares (OLS) Linear Regression models (via `Scikit-Learn`) to project revenue and earnings trends with 95% Confidence Intervals.
+* **Interactive Glassmorphism UI:** Modern, responsive dashboard engineered with vanilla HTML5, CSS3, and JavaScript featuring dual-axis **Chart.js** visualizers, risk heatmaps, and executive summaries.
+* **Contextual Q&A Assistant:** Integrated RAG-inspired chatbot allowing users to query parsed document metrics, risk indicators, and financial trajectories in real time.
+* **Formal Academic Paper:** Includes a complete formal research paper titled *"A Multi-Agent Framework for Structured KPI Extraction and Quantitative Trend Forecasting from Unstructured Financial Reports"* (located in `docs/`).
 
 ---
 
@@ -21,94 +27,97 @@ An advanced Generative AI and Data Science platform that parses unstructured fin
 
 ```mermaid
 graph TD
-    A[Financial Report PDF] --> B[FastAPI Ingestion]
-    B --> C[pypdf Document Processor]
-    C --> D[GenAI Multi-Agent Pipeline]
-    subgraph GenAI Agent Framework
-        D1[Parser Agent: Tabular KPI Extraction]
-        D2[Risk Agent: Qualitative Factor Mining]
-        D3[Sentiment Agent: CEO Sentiment Scoring]
+    A[Multimodal Document PDF / Image / Charts] --> B[FastAPI Ingestion Endpoint]
+    B --> C[Document Processor & Image Parser]
+    C --> D[Gemini Vision-Language Multi-Agent Pipeline]
+    
+    subgraph Multi-Agent LLM Orchestration
+        D1[Vision Parser Agent: Tabular & Image KPI Extraction]
+        D2[Risk Assessment Agent: Qualitative Headwind Mining]
+        D3[Sentiment Agent: Executive MD&A Scoring]
     end
+    
     D --> D1 & D2 & D3
-    D1 --> E[Data Science Analytics Engine]
-    E --> E1[QoQ Growth Calculations]
-    E --> E2[Scikit-Learn OLS Regression Forecasts]
-    E1 & E2 --> F[Premium HTML5/CSS3 Dashboard]
+    D1 --> E[Scikit-Learn Predictive Analytics Engine]
+    E --> E1[QoQ Growth Computation]
+    E --> E2[OLS Linear Regression Forecasting & 95% CI]
+    
+    E1 & E2 --> F[Glassmorphism Dashboard Interface]
     D2 & D3 --> F
-    F --> G[Contextual Q&A Chat Interface]
+    F --> G[Interactive Contextual Chat Agent]
 ```
 
 ---
 
 ## 📁 Repository Structure
+
 ```text
 AlphaDoc-Analytics/
 ├── backend/
 │   ├── pipeline/
-│   │   ├── analytics.py           # Growth & predictive forecasting engine
-│   │   ├── document_processor.py  # PDF text extraction utilities
-│   │   └── llm_extractor.py       # Gemini API / simulated multi-agent pipeline
-│   └── app.py                     # FastAPI server & CORS configurations
+│   │   ├── agents.py              # Multi-agent framework definitions
+│   │   ├── analytics.py           # OLS Regression & QoQ forecasting engine
+│   │   ├── document_processor.py  # Multimodal PDF & text parsing utilities
+│   │   └── llm_extractor.py       # Gemini 1.5 VLM extraction pipeline & fallback
+│   └── app.py                     # FastAPI backend REST API server
 ├── docs/
 │   └── research_paper.md          # Formal academic research publication
 ├── frontend/
-│   ├── app.js                     # Dashboard interaction & Chart.js code
-│   ├── index.html                 # HTML5 document layout
-│   └── styles.css                 # Custom glassmorphism dark-theme styling
+│   ├── app.js                     # Dashboard interactivity & Chart.js renderer
+│   ├── index.html                 # UI document layout & components
+│   └── styles.css                 # Dark-mode glassmorphism styling
 ├── notebooks/
-│   └── eda_and_modeling.ipynb     # Step-by-step Jupyter Notebook walkthrough
-├── .env                           # Local environment configuration file
-├── .gitignore                     # Git build exclusions
-├── requirements.txt               # Backend Python library requirements
-└── README.md                      # General documentation
+│   └── eda_and_modeling.ipynb     # Jupyter Notebook for EDA & model validation
+├── .env                           # Environment configuration
+├── requirements.txt               # Backend Python dependency list
+└── README.md                      # System documentation
 ```
 
 ---
 
 ## 🛠 Setup & Installation
 
-### 1. Clone & Set Up Directory
+### 1. Clone & Navigate to Repository
 ```bash
-# Navigate to your workspace and enter the project folder
 cd AlphaDoc-Analytics
 ```
 
-### 2. Environment Configuration
-Create or modify the `.env` file in the root directory:
+### 2. Configure Environment Variables
+Create or edit the `.env` file in the root folder:
 ```env
-# Gemini API Key (optional - if omitted, mock fallback mode is active)
+# Gemini API Key (Optional - triggers high-fidelity fallback simulation if left empty)
 GEMINI_API_KEY=your_gemini_api_key_here
 PORT=8000
 ```
-*(Note: If no API key is provided, the platform automatically triggers a high-fidelity simulation engine that returns realistic corporate data, allowing full demonstration of the UI dashboard without API costs.)*
+*(Note: If no API key is provided, the platform automatically triggers a high-fidelity simulation engine that returns realistic corporate metrics, allowing full visual demonstration of the dashboard without API token costs.)*
 
-### 3. Install Python Dependencies
+### 3. Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Run the Backend API Server
+### 4. Launch the Backend API Server
 ```bash
 python backend/app.py
 ```
-The FastAPI documentation page will be available at `http://127.0.0.1:8000/docs`.
+The interactive FastAPI Swagger documentation will be live at `http://127.0.0.1:8000/docs`.
 
-### 5. Launch the Frontend Dashboard
-Simply open the `frontend/index.html` file in any modern web browser, or serve it using an HTTP server extension.
-To run a local server for the frontend, you can use:
+### 5. Launch the Frontend UI Dashboard
+Serve the `frontend/` directory using any HTTP web server, or run:
 ```bash
 python -m http.server 8080 --directory frontend
 ```
-Then navigate to `http://localhost:8080` in your browser.
+Open `http://localhost:8080` in your web browser.
 
 ---
 
-## 📝 Research & Citations
-To read the full research paper, open [research_paper.md](docs/research_paper.md). If you use this project in an academic or professional capacity, please cite it as:
+## 📝 Citation & Research
+
+If you utilize this project or multi-agent architecture in academic work, please cite:
 
 ```text
 Chaudhary, S. (2026). "A Multi-Agent Framework for Structured KPI Extraction and Quantitative Trend Forecasting from Unstructured Financial Reports." docs/research_paper.md
 ```
 
 ## 📄 License
-This project is licensed under the MIT License - see the LICENSE file for details.
+Licensed under the [MIT License](LICENSE).

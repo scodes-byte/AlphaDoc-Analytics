@@ -1,5 +1,5 @@
 // -------------------------------------------------------------
-// AlphaDoc-Analytics Frontend Application Logic
+// AlphaDoc-Analytics Multimodal Frontend Application Logic
 // -------------------------------------------------------------
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -11,9 +11,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const fileInput = document.getElementById("file-input");
     const btnLoadDemo = document.getElementById("btn-load-demo");
     const uploadStatus = document.getElementById("upload-status");
+    const visionList = document.getElementById("vision-list");
     const riskList = document.getElementById("risk-list");
     
     const metaCompany = document.getElementById("meta-company");
+    const metaModality = document.getElementById("meta-modality");
     const metaPeriod = document.getElementById("meta-period");
     const metaSentiment = document.getElementById("meta-sentiment");
 
@@ -35,6 +37,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const chatMessages = document.getElementById("chat-messages");
     const chatInput = document.getElementById("chat-input");
     const btnSendChat = document.getElementById("btn-send-chat");
+    const quickPrompts = document.querySelectorAll(".btn-prompt");
 
     // Global Chart Instance Reference
     let kpiChart = null;
@@ -67,13 +70,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- Load Demo Dataset ---
     btnLoadDemo.addEventListener("click", async () => {
-        setLoadingState(true, "Extracting demo records...");
+        setLoadingState(true, "Extracting multimodal demo records...");
         try {
             const response = await fetch(`${API_BASE_URL}/api/demo`);
             if (!response.ok) throw new Error("Demo loader returned connection issue.");
             const data = await response.json();
             updateDashboard(data);
-            addSystemChatMessage("Demo analysis loaded. You can now chat with the simulated financial analyst.");
+            addSystemChatMessage("Multimodal Demo Analysis loaded. You can now chat with the Multi-Agent Vision and KPI Network.");
         } catch (error) {
             setLoadingState(false);
             uploadStatus.innerHTML = `<span style="color: var(--accent);">Failed to load demo data: ${error.message}. Is backend FastAPI running?</span>`;
@@ -82,15 +85,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // --- File Upload Execution ---
     async function handleFileUpload(file) {
-        if (!file.name.toLowerCase().endswith(".pdf")) {
-            uploadStatus.innerHTML = '<span style="color: var(--accent);">Error: Only PDF documents are supported.</span>';
+        const ext = file.name.toLowerCase().substring(file.name.lastIndexOf("."));
+        const allowedExts = [".pdf", ".png", ".jpg", ".jpeg", ".webp", ".bmp"];
+        if (!allowedExts.includes(ext)) {
+            uploadStatus.innerHTML = `<span style="color: var(--accent);">Error: Supported formats: ${allowedExts.join(", ")}</span>`;
             return;
         }
 
         const formData = new FormData();
         formData.append("file", file);
 
-        setLoadingState(true, `Uploading ${file.name}...`);
+        setLoadingState(true, `Analyzing ${file.name}...`);
         try {
             const response = await fetch(`${API_BASE_URL}/api/upload`, {
                 method: "POST",
@@ -104,7 +109,7 @@ document.addEventListener("DOMContentLoaded", () => {
             
             const data = await response.json();
             updateDashboard(data);
-            addSystemChatMessage(`Successfully analyzed ${file.name}. Chat agent is ready.`);
+            addSystemChatMessage(`Successfully ingested ${file.name} (${data.document_type.toUpperCase()} modality). Multi-Agent network is ready.`);
         } catch (error) {
             setLoadingState(false);
             uploadStatus.innerHTML = `<span style="color: var(--accent);">Processing Failed: ${error.message}</span>`;
@@ -126,14 +131,23 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    // --- Chat Integration ---
-    btnSendChat.addEventListener("click", executeChatQuery);
+    // --- Chat & Quick Prompt Integration ---
+    btnSendChat.addEventListener("click", () => executeChatQuery());
     chatInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter") executeChatQuery();
     });
 
-    async function executeChatQuery() {
-        const query = chatInput.value.trim();
+    quickPrompts.forEach(btn => {
+        btn.addEventListener("click", () => {
+            const promptText = btn.getAttribute("data-prompt");
+            if (promptText) {
+                executeChatQuery(promptText);
+            }
+        });
+    });
+
+    async function executeChatQuery(overrideQuery = null) {
+        const query = overrideQuery || chatInput.value.trim();
         if (!query) return;
 
         // Render User Message
@@ -178,7 +192,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (thoughtLog && thoughtLog.length > 0) {
             thoughtHTML = `
                 <details class="thought-trace">
-                    <summary>🛠️ View Agent Thought Trace (${thoughtLog.length} steps)</summary>
+                    <summary>🛠️ View Multimodal Agent Thought Trace (${thoughtLog.length} steps)</summary>
                     <pre class="thought-log-pre">${escapeHTML(thoughtLog.join("\n"))}</pre>
                 </details>
             `;
@@ -208,32 +222,27 @@ document.addEventListener("DOMContentLoaded", () => {
         return formatted;
     }
 
-    // String endsWith fallback
-    if (!String.prototype.endswith) {
-        String.prototype.endswith = function(searchString, position) {
-            const subjectString = this.toString();
-            if (position === undefined || position > subjectString.length) {
-                position = subjectString.length;
-            }
-            position -= searchString.length;
-            const lastIndex = subjectString.indexOf(searchString, position);
-            return lastIndex !== -1 && lastIndex === position;
-        };
-    }
-
     // --- Update Dashboard Elements ---
     function updateDashboard(data) {
         setLoadingState(false);
-        uploadStatus.innerHTML = `<span style="color: var(--secondary);">✓ Analysis Complete (${data.raw_text_length} characters parsed)</span>`;
+        const docTypeTag = (data.document_type || "pdf").toUpperCase();
+        uploadStatus.innerHTML = `<span style="color: var(--secondary);">✓ Multimodal Analysis Complete [Modality: ${docTypeTag}]</span>`;
         
         // 1. Metadata
         metaCompany.innerText = data.company_name;
+        
+        // Render Modality badge
+        if (metaModality) {
+            metaModality.innerText = docTypeTag === "IMAGE" ? "🖼️ Visual Image Chart" : "📄 PDF Document";
+            metaModality.style.borderColor = docTypeTag === "IMAGE" ? "rgba(139, 92, 246, 0.5)" : "rgba(59, 130, 246, 0.5)";
+            metaModality.style.color = docTypeTag === "IMAGE" ? "#c084fc" : "#60a5fa";
+        }
+
         metaPeriod.innerText = `${data.historical[0].period} - ${data.historical[data.historical.length - 1].period}`;
         
         const sentimentInfo = data.sentiment;
         metaSentiment.innerText = `${sentimentInfo.classification} (${sentimentInfo.score})`;
         
-        // Adjust badge coloring based on classification
         metaSentiment.className = "meta-val sentiment-badge";
         if (sentimentInfo.classification.toLowerCase().includes("optimistic") || sentimentInfo.classification.toLowerCase().includes("positive")) {
             metaSentiment.style.borderColor = "rgba(16, 185, 129, 0.4)";
@@ -245,7 +254,21 @@ document.addEventListener("DOMContentLoaded", () => {
             metaSentiment.style.background = "var(--primary-glow)";
         }
 
-        // 2. Risk lists
+        // 2. Vision Agent Insights
+        if (visionList) {
+            visionList.innerHTML = "";
+            const vInsights = data.visual_insights || [];
+            if (vInsights.length === 0) {
+                vInsights.push("Multimodal Vision Agent extracted visual chart layout and document structures.");
+            }
+            vInsights.forEach(insight => {
+                const li = document.createElement("li");
+                li.innerText = insight;
+                visionList.appendChild(li);
+            });
+        }
+
+        // 3. Risk lists
         riskList.innerHTML = "";
         data.risks.forEach(risk => {
             const li = document.createElement("li");
@@ -253,7 +276,7 @@ document.addEventListener("DOMContentLoaded", () => {
             riskList.appendChild(li);
         });
 
-        // 3. KPI Cards
+        // 4. KPI Cards
         const lastHist = data.historical[data.historical.length - 1];
         
         // Revenue Card
@@ -278,7 +301,7 @@ document.addEventListener("DOMContentLoaded", () => {
         kpiNetProj.innerText = `$${data.forecasts.net_income.predicted}M`;
         kpiNetTrend.innerText = `Slope: ${data.forecasts.net_income.trend_slope >= 0 ? '+' : ''}${data.forecasts.net_income.trend_slope}`;
 
-        // 4. Render Chart
+        // 5. Render Chart
         renderVisualCharts(data);
 
         // Enable Chat Input
@@ -290,7 +313,6 @@ document.addEventListener("DOMContentLoaded", () => {
     function renderVisualCharts(data) {
         const ctx = document.getElementById("kpiChart").getContext("2d");
         
-        // Destroy existing chart if present to prevent overlap bugs
         if (kpiChart) {
             kpiChart.destroy();
         }
@@ -302,14 +324,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const netHist = data.historical.map(item => item.net_income);
         const marginHist = data.historical.map(item => item.operating_margin);
 
-        // Append predictions
         const revForecastSeries = [...revHist.map(() => null), data.forecasts.revenue.predicted];
         const netForecastSeries = [...netHist.map(() => null), data.forecasts.net_income.predicted];
         const marginForecastSeries = [...marginHist.map(() => null), data.forecasts.operating_margin.predicted];
-
-        // Prepare standard bounds arrays for confidence intervals
-        const revLowerBounds = [...revHist.map(() => null), data.forecasts.revenue.lower_95];
-        const revUpperBounds = [...revHist.map(() => null), data.forecasts.revenue.upper_95];
 
         kpiChart = new Chart(ctx, {
             type: "bar",
@@ -392,7 +409,6 @@ document.addEventListener("DOMContentLoaded", () => {
                                 }
                                 if (context.parsed.y !== null) {
                                     label += context.parsed.y;
-                                    // Add confidence interval details on forecasted values
                                     if (context.dataIndex === labels.length - 1 && context.datasetIndex === 1) {
                                         label += ` (95% CI: $${data.forecasts.revenue.lower_95}M - $${data.forecasts.revenue.upper_95}M)`;
                                     }

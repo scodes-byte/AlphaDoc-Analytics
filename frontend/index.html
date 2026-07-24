@@ -3,9 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AlphaDoc-Analytics | GenAI & Data Science Document Platform</title>
-    <meta name="description" content="An advanced Generative AI and Data Science platform utilizing multi-agent systems and regression analysis for structured KPI extraction and predictive forecasting from financial reports.">
-    <meta name="keywords" content="Generative AI, Data Science, Financial Forecasting, Multi-Agent Systems, RAG, Machine Learning, FastAPI, Python">
+    <title>AlphaDoc-Analytics | Multimodal GenAI & Data Science Platform</title>
+    <meta name="description" content="An advanced Multimodal Generative AI and Data Science platform utilizing multi-agent systems and regression analysis for structured KPI extraction, visual chart parsing, and predictive forecasting from financial reports and images.">
+    <meta name="keywords" content="Multimodal GenAI, Generative AI, Data Science, Financial Forecasting, Multi-Agent Systems, Vision Agent, FastAPI, Python">
     <meta name="author" content="scodes-byte">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📊</text></svg>">
     
@@ -13,6 +13,9 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- CSS Stylesheet -->
+    <link rel="stylesheet" href="styles.css">
     
     <!-- Chart.js CDN -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -27,30 +30,40 @@
             <span class="logo-icon">▲</span>
             <div class="logo-text">
                 <h1>AlphaDoc-Analytics</h1>
-                <p>GenAI Multi-Agent Financial Document Platform</p>
+                <p>Multimodal GenAI & Multi-Agent Financial Platform</p>
             </div>
         </div>
         <div class="header-controls">
+            <span class="multimodal-badge">👁️ Multimodal Agent Network Active</span>
             <button id="btn-load-demo" class="btn btn-secondary">⚡ Load Demo Analysis</button>
         </div>
     </header>
 
     <main class="app-container">
-        <!-- Sidebar Upload & Chat Area -->
+        <!-- Sidebar Upload & Agent Panels -->
         <aside class="app-sidebar">
             <!-- Upload Panel -->
             <section class="card upload-card">
-                <h2>Document Ingestion</h2>
-                <p class="subtitle">Upload a quarterly financial report (PDF)</p>
+                <h2>Multimodal Ingestion</h2>
+                <p class="subtitle">Upload Financial PDF or Image Chart (PNG, JPG, WEBP)</p>
                 <div id="dropzone" class="dropzone">
                     <div class="dropzone-content">
                         <span class="upload-icon">📥</span>
-                        <p>Drag & drop file here or <span class="highlight">browse</span></p>
-                        <span class="file-info">Supports financial PDFs up to 25MB</span>
+                        <p>Drag & drop PDF / Image here or <span class="highlight">browse</span></p>
+                        <span class="file-info">Supports Financial PDFs & Visual Chart Screenshots up to 25MB</span>
                     </div>
-                    <input type="file" id="file-input" accept=".pdf" style="display: none;">
+                    <input type="file" id="file-input" accept=".pdf, .png, .jpg, .jpeg, .webp" style="display: none;">
                 </div>
                 <div id="upload-status" class="upload-status"></div>
+            </section>
+
+            <!-- Multimodal Vision Agent Panel -->
+            <section class="card vision-card">
+                <h2>Multimodal Vision Agent</h2>
+                <p class="subtitle">Visual chart & document OCR highlights</p>
+                <ul id="vision-list" class="vision-list">
+                    <li class="placeholder-text">Upload a PDF or image to extract visual insights...</li>
+                </ul>
             </section>
 
             <!-- Risk Analysis Panel -->
@@ -70,6 +83,10 @@
                 <div class="meta-item">
                     <span class="meta-label">Analyzed Entity:</span>
                     <span id="meta-company" class="meta-val">None</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-label">Document Modality:</span>
+                    <span id="meta-modality" class="meta-val modality-badge">None</span>
                 </div>
                 <div class="meta-item">
                     <span class="meta-label">Period Scope:</span>
@@ -144,19 +161,28 @@
                 </div>
             </div>
 
-            <!-- Chat & Discussion Panel -->
+            <!-- Chat & Multi-Agent Panel -->
             <div class="card chat-card-bottom">
-                <h2>Contextual Chat Agent</h2>
-                <p class="subtitle">Ask questions about metrics, risks, or CEO statements</p>
+                <div class="chat-header-row">
+                    <div>
+                        <h2>Multimodal Conversational Agent Network</h2>
+                        <p class="subtitle">Ask questions to Orchestrator, KPI, Risk, Sentiment, or Vision Agents</p>
+                    </div>
+                    <div class="quick-prompts">
+                        <button class="btn-prompt" data-prompt="What does the Multimodal Vision Agent observe in the document layout?">👁️ Visual Insights</button>
+                        <button class="btn-prompt" data-prompt="What is the forecasted revenue and net income for next quarter?">💰 Forecasts</button>
+                        <button class="btn-prompt" data-prompt="What are the operational risk headwinds?">⚠️ Risk Factors</button>
+                    </div>
+                </div>
                 <div class="chat-container">
                     <div id="chat-messages" class="chat-messages">
                         <div class="message system-message">
-                            <span class="message-sender">Agent</span>
-                            <div class="message-text">System initialised. Upload a PDF document or load the demo dataset to begin interacting with the document.</div>
+                            <span class="message-sender">Agent Network</span>
+                            <div class="message-text">Multimodal Agent Network initialized. Upload a PDF report or Image chart, or click 'Load Demo Analysis' to start.</div>
                         </div>
                     </div>
                     <div class="chat-input-row">
-                        <input type="text" id="chat-input" placeholder="Ask a question (e.g., 'What is the projected revenue next quarter?')..." disabled>
+                        <input type="text" id="chat-input" placeholder="Ask a question (e.g., 'What visual chart trends or revenue metrics are found?')..." disabled>
                         <button id="btn-send-chat" class="btn btn-primary" disabled>Send ✉</button>
                     </div>
                 </div>
@@ -165,7 +191,7 @@
     </main>
 
     <footer class="app-footer">
-        <p>&copy; 2026 AlphaDoc-Analytics Platform. Designed for Job-Ready Data Science Portfolios.</p>
+        <p>&copy; 2026 AlphaDoc-Analytics Platform. Multimodal GenAI & Data Science Architecture.</p>
         <div class="footer-links">
             <a href="https://github.com/scodes-byte" target="_blank">GitHub Profile</a>
             <span>|</span>
@@ -173,8 +199,6 @@
         </div>
     </footer>
 
-    <!-- Style import via direct link as requested in guidelines -->
-    <link rel="stylesheet" href="styles.css">
     <!-- JS script -->
     <script src="app.js"></script>
 </body>

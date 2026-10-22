@@ -18,7 +18,7 @@
     <link rel="stylesheet" href="styles.css">
     
     <!-- Chart.js CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body>
     <!-- Background glowing orbs for ambient glow -->
@@ -34,8 +34,8 @@
             </div>
         </div>
         <div class="header-controls">
-            <span class="multimodal-badge">👁️ Multimodal Agent Network Active</span>
-            <button id="btn-load-demo" class="btn btn-secondary">⚡ Load Demo Analysis</button>
+            <span class="multimodal-badge" id="llm-badge">Checking LLM status…</span>
+            <button id="btn-load-demo" class="btn btn-secondary">⚡ Load Tesla 2024 Demo</button>
         </div>
     </header>
 
@@ -52,15 +52,15 @@
                         <p>Drag & drop PDF / Image here or <span class="highlight">browse</span></p>
                         <span class="file-info">Supports Financial PDFs & Visual Chart Screenshots up to 25MB</span>
                     </div>
-                    <input type="file" id="file-input" accept=".pdf, .png, .jpg, .jpeg, .webp" style="display: none;">
+                    <input type="file" id="file-input" accept=".pdf,.png,.jpg,.jpeg,.webp,.bmp" style="display: none;">
                 </div>
                 <div id="upload-status" class="upload-status"></div>
             </section>
 
             <!-- Multimodal Vision Agent Panel -->
             <section class="card vision-card">
-                <h2>Multimodal Vision Agent</h2>
-                <p class="subtitle">Visual chart & document OCR highlights</p>
+                <h2>Document Insights</h2>
+                <p class="subtitle">Vision-model findings (with API key) or facts computed from the KPI table</p>
                 <ul id="vision-list" class="vision-list">
                     <li class="placeholder-text">Upload a PDF or image to extract visual insights...</li>
                 </ul>
@@ -69,7 +69,7 @@
             <!-- Risk Analysis Panel -->
             <section class="card risk-card">
                 <h2>Risk Analysis Agent</h2>
-                <p class="subtitle">Qualitative risk vectors extracted by LLM</p>
+                <p class="subtitle">Risk statements extracted from the document</p>
                 <ul id="risk-list" class="risk-list">
                     <li class="placeholder-text">Upload a document to run agent risk analysis...</li>
                 </ul>
@@ -153,8 +153,8 @@
             <div class="charts-row">
                 <!-- KPI Historical & Forecast Chart -->
                 <div class="card chart-card">
-                    <h2>Historical KPI Sequences & Predictive Regression Line</h2>
-                    <p class="subtitle">Data science trend extrapolation with confidence intervals</p>
+                    <h2>Historical KPIs & Next-Quarter Forecast</h2>
+                    <p class="subtitle">OLS linear trend; hover the forecast for its 95% prediction interval</p>
                     <div class="chart-container">
                         <canvas id="kpiChart"></canvas>
                     </div>
@@ -178,7 +178,7 @@
                     <div id="chat-messages" class="chat-messages">
                         <div class="message system-message">
                             <span class="message-sender">Agent Network</span>
-                            <div class="message-text">Multimodal Agent Network initialized. Upload a PDF report or Image chart, or click 'Load Demo Analysis' to start.</div>
+                            <div class="message-text">Multimodal Agent Network initialized. Upload a PDF report or Image chart, or click 'Load Tesla 2024 Demo' to start.</div>
                         </div>
                     </div>
                     <div class="chat-input-row">

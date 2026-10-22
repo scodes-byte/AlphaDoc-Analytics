@@ -1,184 +1,191 @@
 import os
-import shutil
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form
+import sys
+import glob
+import uuid
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
+# Make "pipeline" importable whether the app is started via run.py, uvicorn or `python backend/app.py`
+BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+if BACKEND_DIR not in sys.path:
+    sys.path.insert(0, BACKEND_DIR)
+
+load_dotenv(os.path.join(os.path.dirname(BACKEND_DIR), ".env"))
+
+from pipeline import llm_client
 from pipeline.document_processor import DocumentProcessor
 from pipeline.llm_extractor import LLMExtractor
 from pipeline.analytics import AnalyticsEngine
 from pipeline.agents import OrchestratorAgent
-
-load_dotenv()
+from pipeline.table_parser import extract_kpi_table, merge_kpi_histories
+from pipeline.narrative import compute_insights
 
 app = FastAPI(
     title="AlphaDoc-Analytics API",
-    description="Backend services for Generative AI KPI Extraction and Predictive Analytics.",
-    version="1.0.0"
+    description="Backend services for financial KPI extraction and trend forecasting.",
+    version="2.0.0"
 )
 
-# CORS Policy configuration
+# The dashboard is served from this same origin; CORS only matters when the
+# frontend is served separately (e.g. python -m http.server 8080).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Permits dashboard access from any client host/port
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=["http://localhost:8080", "http://127.0.0.1:8080"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
-UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
+PROJECT_ROOT = os.path.dirname(BACKEND_DIR)
+UPLOAD_DIR = os.path.join(BACKEND_DIR, "uploads")
+DEMO_DIR = os.path.join(PROJECT_ROOT, "real_datasets")
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Shared in-memory cache to store the last analyzed document results for the chat agent
-document_store = {
-    "current_analysis": None
-}
+# In-memory store for the last analysed document (single-user demo; a real deployment
+# would key this by session and persist it in a database).
+document_store = {"current_analysis": None}
+
+# The demo PDFs never change, so parse them once per process (~10 s) and reuse the result
+demo_cache: list = []
+
+orchestrator = OrchestratorAgent()
+
 
 class ChatMessage(BaseModel):
-    message: str
+    message: str = Field(min_length=1, max_length=2000)
 
-# Instantiate Multi-Agent Orchestrator
-orchestrator = OrchestratorAgent()
+
+def build_analysis(extracted: dict, doc_info: dict, file_name: str) -> dict:
+    """Runs forecasting on extracted KPIs and assembles the dashboard payload."""
+    analytics_results = AnalyticsEngine.forecast_next_period(extracted["kpis"])
+    return {
+        "company_name": extracted["company_name"],
+        "financial_year": extracted["financial_year"],
+        "document_type": doc_info["document_type"],
+        "visual_insights": extracted["visual_insights"],
+        "file_name": file_name,
+        "risks": extracted["risks"],
+        "sentiment": extracted["sentiment"],
+        "historical": analytics_results["historical"],
+        "next_period": analytics_results["next_period"],
+        "forecasts": analytics_results["forecasts"],
+        "forecast_model": analytics_results["model"],
+        "extraction_mode": extracted["extraction_mode"],
+        "raw_text_length": len(doc_info["text_content"]),
+    }
+
+
+def remember(analysis: dict, doc_info: dict) -> dict:
+    """Caches the analysis for the chat agents. The image stays server-side and is not sent back to the browser."""
+    document_store["current_analysis"] = {
+        **analysis,
+        "image_b64": doc_info.get("image_b64"),
+        "mime_type": doc_info.get("mime_type"),
+    }
+    return analysis
+
+
+@app.get("/api/health")
+async def health():
+    return {"status": "ok", "llm_enabled": llm_client.is_enabled(), "llm_model": llm_client.model_name()}
+
 
 @app.post("/api/upload")
 async def upload_document(file: UploadFile = File(...)):
     """
-    Saves an uploaded PDF document or Image (PNG/JPG/WEBP), extracts text and visual features,
-    and processes it through the Multimodal GenAI and Analytics pipeline.
+    Accepts a PDF or image, extracts KPIs, risks and sentiment, and forecasts the next quarter.
+    Returns 400 for bad input, 422 when no usable KPI series is found, 500 for unexpected errors.
     """
-    ext = os.path.splitext(file.filename)[1].lower()
-    allowed_exts = {".pdf", ".png", ".jpg", ".jpeg", ".webp", ".bmp"}
-    if ext not in allowed_exts:
+    original_name = os.path.basename(file.filename or "")
+    ext = os.path.splitext(original_name)[1].lower()
+    if ext not in DocumentProcessor.SUPPORTED_EXTENSIONS:
         raise HTTPException(
-            status_code=400, 
-            detail=f"Unsupported file format '{ext}'. Supported formats: {', '.join(allowed_exts)}"
+            status_code=400,
+            detail=f"Unsupported file format '{ext}'. Supported: {', '.join(sorted(DocumentProcessor.SUPPORTED_EXTENSIONS))}"
         )
-        
-    file_path = os.path.join(UPLOAD_DIR, file.filename)
+
+    content = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File is larger than the 25 MB limit.")
+
+    # Random server-side name: the client-supplied name is never used as a path (prevents ../ traversal)
+    file_path = os.path.join(UPLOAD_DIR, f"{uuid.uuid4().hex}{ext}")
     try:
         with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-            
-        # 1. Process Document or Image
+            buffer.write(content)
+
         doc_info = DocumentProcessor.process_file(file_path)
-        
-        # 2. Extract structured fields using Multimodal LLM Extractor
-        extractor = LLMExtractor()
-        extracted_data = extractor.analyze_document(
+        extracted = LLMExtractor().analyze_document(
             text_content=doc_info["text_content"],
-            filename=file.filename,
+            filename=original_name,
             document_type=doc_info["document_type"],
-            image_b64=doc_info["image_b64"]
+            image_b64=doc_info["image_b64"],
+            mime_type=doc_info["mime_type"],
         )
-        
-        # 3. Perform Data Science Forecasting
-        kpi_series = extracted_data.get("kpis", [])
-        if not kpi_series:
-            raise ValueError("No financial KPI time-series metrics could be extracted from this document/image.")
-            
-        analytics_results = AnalyticsEngine.forecast_next_period(kpi_series)
-        
-        # Merge structured results
-        full_analysis = {
-            "company_name": extracted_data.get("company_name", "GlobalCorp Technologies"),
-            "financial_year": extracted_data.get("financial_year", "FY2025"),
-            "document_type": doc_info["document_type"],
-            "visual_insights": extracted_data.get("visual_insights", []),
-            "image_b64": doc_info["image_b64"],
-            "file_name": file.filename,
-            "risks": extracted_data.get("risks", []),
-            "sentiment": extracted_data.get("sentiment", {}),
-            "historical": analytics_results.get("historical", []),
-            "next_period": analytics_results.get("next_period", "Next Period"),
-            "forecasts": analytics_results.get("forecasts", {}),
-            "raw_text_length": len(doc_info["text_content"])
-        }
-        
-        # Cache results in-memory for Q&A sessions
-        document_store["current_analysis"] = full_analysis
-        return full_analysis
-        
+        return remember(build_analysis(extracted, doc_info, original_name), doc_info)
+
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Pipeline processing failed: {str(e)}")
+    finally:
         if os.path.exists(file_path):
             os.remove(file_path)
-        raise HTTPException(status_code=500, detail=f"Multimodal pipeline processing failed: {str(e)}")
+
 
 @app.get("/api/demo")
 async def load_demo_data():
     """
-    Loads pre-calculated high-fidelity multimodal analysis (text + visual chart) 
-    to enable immediate testing of the dashboard components without requiring a upload.
+    Runs the real pipeline on the bundled Tesla 2024 quarterly update PDFs. The KPI tables of
+    all four reports are merged into one 8-quarter history (later reports win on restatements);
+    the narrative (risks, sentiment) comes from the latest report.
     """
-    extractor = LLMExtractor()
-    extracted_data = extractor.analyze_document("", "demo_report.pdf", document_type="pdf")
-    analytics_results = AnalyticsEngine.forecast_next_period(extracted_data["kpis"])
-    
-    demo_analysis = {
-        "company_name": extracted_data["company_name"],
-        "financial_year": extracted_data["financial_year"],
-        "document_type": "pdf",
-        "visual_insights": extracted_data.get("visual_insights", [
-            "Multimodal Vision Agent parsed quarterly revenue bar charts and confirmed upward trend.",
-            "Operating margin progression exhibits +1.6% net expansion despite capital expenditure.",
-            "Infographic balance sheet table confirms strong liquidity ratio and robust cash reserves."
-        ]),
-        "image_b64": None,
-        "file_name": "demo_report.pdf",
-        "risks": extracted_data["risks"],
-        "sentiment": extracted_data["sentiment"],
-        "historical": analytics_results["historical"],
-        "next_period": analytics_results["next_period"],
-        "forecasts": analytics_results["forecasts"],
-        "raw_text_length": 45120
-    }
-    
-    document_store["current_analysis"] = demo_analysis
-    return demo_analysis
+    if demo_cache:
+        return remember(*demo_cache)
+
+    pdf_paths = sorted(glob.glob(os.path.join(DEMO_DIR, "*.pdf")))
+    if not pdf_paths:
+        raise HTTPException(status_code=404, detail="No demo PDFs found in real_datasets/. Run backend/download_real_data.py.")
+
+    docs = [DocumentProcessor.process_file(p) for p in pdf_paths]
+    latest = docs[-1]
+    extracted = LLMExtractor().analyze_document(latest["text_content"], latest["file_name"], document_type="pdf")
+    extracted["kpis"] = merge_kpi_histories([extract_kpi_table(d["text_content"]) for d in docs])
+    extracted["extraction_mode"]["kpis"] = f"rule_based_table_parser (merged from {len(docs)} reports)"
+    if extracted["extraction_mode"]["narrative"] != "llm":
+        extracted["visual_insights"] = compute_insights(extracted["kpis"])
+
+    file_label = f"{len(docs)} Tesla quarterly updates (2024)"
+    demo_cache[:] = [build_analysis(extracted, latest, file_label), latest]
+    return remember(*demo_cache)
+
 
 @app.post("/api/chat")
 async def chat_with_document(chat: ChatMessage):
-    """
-    Coordinates specialized financial agents (Orchestrator, KPI, Risk, Sentiment)
-    to perform multi-agent analysis and return the synthesized response alongside thought traces.
-    """
+    """Routes the question to the relevant specialist agents and returns the answer plus the agents' trace."""
     analysis = document_store["current_analysis"]
     if not analysis:
         return {
-            "response": "Please upload a financial document or click 'Load Demo Data' before starting the chat.",
+            "response": "Please upload a financial document or click 'Load Demo Analysis' before starting the chat.",
             "thought_log": []
         }
-        
+
     try:
         response, thought_log = orchestrator.coordinate(chat.message, analysis)
         return {"response": response, "thought_log": thought_log}
     except Exception as e:
-        import traceback
-        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Multi-agent reasoning failed: {str(e)}")
 
-frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
 
-# Compatibility routes for legacy static paths
-@app.get("/static/css/style.css")
-@app.get("/static/css/styles.css")
-@app.get("/style.css")
-@app.get("/styles.css")
-async def get_styles():
-    from fastapi.responses import FileResponse
-    return FileResponse(os.path.join(frontend_dir, "styles.css"), media_type="text/css")
+frontend_dir = os.path.join(PROJECT_ROOT, "frontend")
 
-@app.get("/static/js/app.js")
-@app.get("/app.js")
-async def get_script():
-    from fastapi.responses import FileResponse
-    return FileResponse(os.path.join(frontend_dir, "app.js"), media_type="application/javascript")
-
-# Mount frontend files to serve the dashboard UI at the root path /
+# Serve the dashboard UI at / (API routes above take precedence)
 app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
 
 if __name__ == "__main__":
     import uvicorn
-    # Serves API and UI locally on port 8000 when executed directly
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=int(os.getenv("PORT", "8000")))

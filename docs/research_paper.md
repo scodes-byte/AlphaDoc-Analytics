@@ -1,119 +1,106 @@
-# A Multi-Agent Framework for Structured KPI Extraction and Quantitative Trend Forecasting from Unstructured Financial Reports
+# Hybrid KPI Extraction and Uncertainty-Aware Trend Forecasting from Quarterly Financial Reports
 
-**Author:** Sneha Chaudhary (scodes-byte)  
-**Affiliation:** Portfolio Project for Advanced Data Science Specialization  
-**Date:** July 2026  
+**Author:** Sneha Chaudhary (scodes-byte)
+**Type:** Technical report for a portfolio project (not peer reviewed)
 
 ---
 
 ### Abstract
-Unstructured financial reports, such as quarterly and annual earnings releases, represent a vital source of information for stakeholders, analysts, and automated trading algorithms. However, extracting key performance indicators (KPIs) and performing timely quantitative trend modeling from these text-heavy documents remains challenging. This paper presents *AlphaDoc-Analytics*, an integrated software framework that fuses Generative AI (GenAI) multi-agent architectures with classical predictive regression modeling. By deploying decoupled LLM agents (Parser, Risk, and Sentiment Agents) to extract structured parameters, we feed an downstream analytics engine that computes quarter-over-quarter growth rates and executes linear regressions with 95% confidence boundaries to forecast upcoming performance metrics. We evaluate our pipeline on extraction precision and prediction error rates, demonstrating a robust, production-ready implementation.
+Quarterly earnings documents are semi-structured: the key numbers sit in tables, surrounded by narrative.
+This report describes *AlphaDoc-Analytics*, a pipeline that (1) extracts a quarterly KPI table with a
+deterministic parser, falling back to a schema-validated LLM for layouts the parser cannot read or for images,
+(2) checks that extracted numbers literally occur in the source text, and (3) forecasts the next quarter with an
+ordinary-least-squares trend and a t-distribution prediction interval. On Tesla's four 2024 quarterly update
+PDFs the parser recovers 80/80 hand-checked values. A walk-forward backtest over 8 quarters shows the linear trend
+is only marginally better than a naive last-value forecast for revenue (MAPE 8.6% vs 9.0%) and worse for net
+income, whose series contains a one-off tax benefit. We argue that reporting this uncertainty honestly is more
+useful than a confident point forecast.
 
 ---
 
-## 1. Introduction
-Modern investment and risk-management strategies heavily rely on parsing public financial reports (e.g., PDFs of SEC filings, earnings calls transcripts). These reports are natively unstructured, varying in formats, nomenclature, and tabular designs. Traditional Natural Language Processing (NLP) models based on regular expressions (regex) or rule-based layouts often fail when layouts shift.
+## 1. Motivation
+LLMs read heterogeneous layouts well but are unreliable at arithmetic and may produce plausible numbers that
+are not in the document. Classical statistics is reliable at arithmetic but needs structured inputs. The system
+therefore separates the two: **models read, statistics predict**, and every number carries its provenance.
 
-To address this limitation, we present a system that combines:
-1. **Semantic Understanding:** Large Language Models (LLMs) used to parse tables and narrative text semantically.
-2. **Multi-Agent Decoupling:** Isolating numeric parsing, qualitative risk vectoring, and executive sentiment extraction to reduce cognitive load on the LLM.
-3. **Statistical Extrapolations:** Using classical statistical forecasting models on the extracted data series to prevent LLM hallucinations during numerical forecasting.
+## 2. Method
 
----
+### 2.1 Document ingestion
+`pypdf` extracts the text layer of each page. Images are base64-encoded with their detected MIME type for a
+vision-language model. PDFs without a text layer (scans) are rejected with an explanatory error.
 
-## 2. Related Work
-Historically, financial document analysis relied on Named Entity Recognition (NER) models trained on specialized financial corpora (e.g., FinBERT). While effective for sentiment classifications, these architectures cannot structure complex datasets into structured JSON format. 
+### 2.2 KPI extraction
+**Rule-based table parser.** A header line containing two or more quarter labels (`Q4-2024`, `Q4 2024`, `Q4'24`)
+opens a table block. Rows whose label matches a priority-ordered pattern list are read; the first *N* numeric cells
+map to the *N* header periods, so trailing YoY columns are ignored. Parentheses denote negatives; GAAP rows take
+priority over non-GAAP rows; operating margin is derived from operating income when not reported. The block with
+the most recognised metrics wins.
 
-Recent literature has highlighted Retrieval-Augmented Generation (RAG) and LLM-based structured JSON extraction. However, direct numerical forecasting using autoregressive language models yields high error rates due to the models' inherent weakness in mathematical computations. Our approach decouples semantic extraction from numerical prediction by processing time-series metrics through standard data science libraries (e.g., Scikit-Learn) after extraction.
+**LLM fallback.** When fewer than three quarters are found, or the input is an image, Gemini is called in JSON mode.
+The reply is validated with Pydantic (types, ranges); invalid replies are discarded rather than repaired.
 
----
+**Grounding check.** For PDFs, the share of extracted values that appear verbatim in the text is reported.
+For the rule-based parser this is 100% by construction; for LLM output it is a cheap hallucination signal.
 
-## 3. Architecture & Methodology
+### 2.3 Narrative signals
+Without an LLM: risk statements are sentences ranked by risk-term density, with legal boilerplate removed; tone is
+a finance word-list score `(pos − neg) / (pos + neg)` in [−1, 1]. With an LLM, both come from the validated JSON.
 
-The AlphaDoc-Analytics pipeline consists of three sequential phases:
+### 2.4 Forecasting
+For each KPI with *n* ≥ 3 observations, fit `y_t = β0 + β1·t + ε_t` by OLS on the quarter index. For the next
+index `t0 = n`:
 
-```mermaid
-graph TD
-    A[Unstructured PDF Document] --> B[Text Ingestion & Chunking]
-    B --> C[GenAI Multi-Agent Pipeline]
-    subgraph GenAI Agents
-        C1[Parser Agent: Extracted KPIs]
-        C2[Risk Agent: Extracted Hazards]
-        C3[Sentiment Agent: Computed Score]
-    end
-    C --> C1 & C2 & C3
-    C1 --> D[Data Science Analytics Engine]
-    D --> D1[QoQ Growth Calculations]
-    D --> D2[Regression-Based Forecasting]
-    D1 & D2 --> E[Interactive HTML5/CSS3 Dashboard]
-    C2 & C3 --> E
+```
+ŷ(t0) ± t(0.975, n−2) · s · sqrt(1 + 1/n + (t0 − t̄)² / Σ(t − t̄)²),     s = sqrt(SSE / (n − 2))
 ```
 
-### 3.1 Multi-Agent Parsing Engine
-We use an agentic orchestration where:
-* **Parser Agent:** Prompts the model to parse tables, outputting a chronological list of dicts:
-  \[
-  \mathcal{K} = \{K_t\}_{t=1}^{T} \quad \text{where} \quad K_t = (\text{Period}_t, \text{Revenue}_t, \text{Operating Margin}_t, \text{Net Income}_t, \text{EPS}_t)
-  \]
-* **Risk Agent:** Scans the text for risk disclosures, aggregating them into a qualitative list of concerns.
-* **Sentiment Agent:** Maps CEO remarks to a score \(S \in [-1, 1]\).
+This is a *prediction* interval for one new observation (the `1 +` term), uses the t distribution because σ is
+estimated from few points, and widens with distance from the centre of the data. An earlier version of this project
+used `±1.96 · std(residuals)`, which ignores all three effects and is too narrow for small *n*.
 
-### 3.2 Quantitative Forecasting Engine
-Let \(y_t\) represent the target metric (e.g., Revenue) at time step \(t \in \{1, 2, \dots, T\}\). We fit a linear trend model:
-\[
-y_t = \beta_0 + \beta_1 t + \epsilon_t
-\]
-where:
-* \(\beta_0\) is the intercept.
-* \(\beta_1\) is the growth rate trend slope coefficient computed via ordinary least squares (OLS):
-  \[
-  \beta_1 = \frac{\sum_{t=1}^{T} (t - \bar{t})(y_t - \bar{y})}{\sum_{t=1}^{T} (t - \bar{t})^2}
-  \]
-* \(\epsilon_t\) represents the error residual term.
+### 2.5 Conversational layer
+An orchestrator routes questions by whole-word keyword matching to KPI, Risk, Sentiment and Vision agents (each a
+specialised prompt over the same extracted context) and merges their answers. Without an LLM, agents answer from
+templates filled with the extracted data. This is prompt specialisation with rule-based routing, not autonomous
+agents with tools or memory.
 
-The forecast for the next chronological period \(T+1\) is defined as:
-\[
-\hat{y}_{T+1} = \beta_0 + \beta_1 (T + 1)
-\]
-We construct the 95% Confidence Interval (CI) bounds using the standard deviation of historical residuals \(\sigma_{\epsilon}\):
-\[
-\text{CI}_{95\%} = \left[ \hat{y}_{T+1} - 1.96 \sigma_{\epsilon}, \;\; \hat{y}_{T+1} + 1.96 \sigma_{\epsilon} \right]
-\]
+## 3. Evaluation
+All numbers are reproducible with `python backend/evaluate.py`.
 
----
+**Data.** Tesla Q1–Q4 2024 quarterly update PDFs (36 pages each). Each contains a five-quarter Financial Summary
+table; merged, they cover Q1 2023–Q4 2024 (8 quarters).
 
-## 4. Implementation Details
-* **Backend:** Built using **FastAPI** in Python. Document parsing uses `pypdf`, and regression models are computed using `scikit-learn`'s `LinearRegression`.
-* **Frontend:** Developed using vanilla HTML5, CSS3 (featuring glassmorphism layouts and responsive design), and Javascript. Chart rendering is handled via **Chart.js** leveraging dual-axis alignments (primary axes for dollar metrics, secondary right-hand axis for margins).
+**Extraction.** 4 reports × 5 quarters × 4 KPIs (revenue, operating margin, GAAP net income, diluted GAAP EPS)
+compared with values checked by hand against the tables: **80/80 correct**. Overlapping quarters across reports
+agree in every case (0 conflicts).
 
----
+**Forecasting.** One-step-ahead walk-forward backtest, training on the first 3–7 quarters:
 
-## 5. Evaluation & Results
-We validated the system using corporate financial releases. On a test set of 20 historical documents:
-1. **Extraction Accuracy:** The Parser Agent achieved a 100% success rate in structuring KPI lists when tables were cleanly presented.
-2. **Forecasting Error:** The OLS forecasting model registered a Mean Absolute Error (MAE) of less than 2.5% on linear growth trajectories, though errors widened during non-linear transitions (e.g., sudden market shocks).
+| Series | OLS MAPE | Naive (last value) MAPE | 95% PI coverage |
+| --- | --- | --- | --- |
+| Revenue | 8.61% | 9.03% | 5/5 |
+| Net income (GAAP) | 168.3% | 148.1% | 5/5 |
 
-The chart below shows the forecasted values plotted alongside historical actuals:
+Final model on all 8 quarters, revenue forecast for Q1 2025: **$25.4B, 95% PI [$20.7B, $30.1B], R² = 0.16**.
+(Tesla later reported Q1 2025 revenue of about $19.3B, below the interval; the series had no trend information
+about the demand drop.)
 
-| Metric | Last Actual (Q4 2025) | Forecast (Q1 2026) | Trend Slope |
-| :--- | :---: | :---: | :---: |
-| **Revenue** | $1696.29M | $1758.82M | +62.53 |
-| **Net Income** | $249.33M | $259.45M | +10.12 |
-| **Operating Margin** | 19.8% | 20.2% | +0.40 |
+## 4. Discussion and limitations
+- **Extraction generalisation is untested.** One issuer, one layout. A real evaluation needs many issuers and
+  layouts (10-Q tables, multi-row headers, scanned filings).
+- **Small n.** With 8 quarters, the trend model carries little information; 100% interval coverage over 5 points
+  says the intervals are wide, not that they are well calibrated.
+- **One-off items.** Q4 2023 GAAP net income ($7.9B) includes a large one-time tax benefit. A linear trend is the
+  wrong model for such a series; robust regression (e.g. Huber loss) or forecasting non-GAAP figures would help.
+- **Lexicon sentiment** is transparent but crude; it cannot read negation or context.
 
----
-
-## 6. Discussion & Future Work
-While OLS is computationally fast and highly interpretable, future iterations could benefit from integrating autoregressive networks (e.g., ARIMA) or non-linear machine learning models (e.g., XGBoost, LSTM) as historical sequences lengthen. Additionally, integrating vector embeddings for semantic similarity search over document segments would enhance the Q&A agent's capabilities.
-
----
-
-## 7. Conclusion
-AlphaDoc-Analytics successfully demonstrates that combining Generative AI with classical data science results in a robust, high-performance financial intelligence platform. By decoupling unstructured semantic extraction from numeric statistical modeling, we achieve high accuracy and clear interpretability, making this design highly relevant for modern enterprise analytics.
-
----
+## 5. Conclusion
+Separating extraction from prediction, preferring deterministic extraction where it works, validating model output,
+and reporting prediction intervals produces a system whose numbers can be traced and whose uncertainty is visible.
+The main open work is evaluation across many document layouts.
 
 ## References
-1. Vaswani, A., et al. (2017). "Attention Is All You Need." *Advances in Neural Information Processing Systems*.
-2. Araci, D. (2019). "FinBERT: Financial Sentiment Analysis with BERT." *arXiv preprint arXiv:1908.10063*.
-3. Pedregosa, F., et al. (2011). "Scikit-learn: Machine Learning in Python." *Journal of Machine Learning Research*.
+1. Loughran, T. & McDonald, B. (2011). "When Is a Liability Not a Liability? Textual Analysis, Dictionaries, and 10-Ks." *Journal of Finance* 66(1).
+2. Montgomery, D., Peck, E. & Vining, G. *Introduction to Linear Regression Analysis* (prediction intervals for new observations).
+3. Hyndman, R. J. & Athanasopoulos, G. *Forecasting: Principles and Practice* (naive benchmarks, time-series cross-validation).
+4. Pedregosa, F., et al. (2011). "Scikit-learn: Machine Learning in Python." *JMLR* 12.

@@ -1,20 +1,16 @@
+"""
+Generates SYNTHETIC sample PDFs (fictional numbers, for UI testing only).
+Requires: pip install reportlab
+"""
 import os
-import subprocess
-import sys
 
-# Ensure reportlab is installed
 try:
     from reportlab.lib.pagesizes import letter
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib import colors
 except ImportError:
-    print("[Sample Generator] Installing reportlab library...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "reportlab"])
-    from reportlab.lib.pagesizes import letter
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib import colors
+    raise SystemExit("reportlab is required for this script: pip install reportlab")
 
 def create_financial_pdf(filename, company_name, kpi_data, risks, ceo_text):
     doc = SimpleDocTemplate(filename, pagesize=letter)
@@ -56,7 +52,7 @@ def create_financial_pdf(filename, company_name, kpi_data, risks, ceo_text):
     
     # 1. Header
     story.append(Paragraph(f"{company_name} - Q4 2025 Financial Statement", title_style))
-    story.append(Paragraph("Published: January 2026 | Regulatory Filing Report", body_style))
+    story.append(Paragraph("SYNTHETIC SAMPLE - fictional figures for software testing, not real company data", body_style))
     story.append(Spacer(1, 15))
     
     # 2. Executive Summary

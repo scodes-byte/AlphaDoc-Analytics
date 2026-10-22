@@ -1,13 +1,10 @@
 # backend/pipeline/agents.py
 
-import os
+import re
 import time
-import base64
 from typing import List, Dict, Any, Tuple, Optional
-import google.generativeai as genai
-from dotenv import load_dotenv
 
-load_dotenv()
+from pipeline import llm_client
 
 class BaseAgent:
     def __init__(self, name: str, role: str, description: str):
@@ -15,24 +12,17 @@ class BaseAgent:
         self.role = role
         self.description = description
         
-        self.api_key = os.getenv("GEMINI_API_KEY")
-        self.use_real_llm = bool(self.api_key and self.api_key.strip())
-        
-        if self.use_real_llm:
-            genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel("gemini-1.5-flash")
+        self.use_real_llm = llm_client.is_enabled()
 
-    def _call_llm_with_fallback(self, prompt: str, fallback_response: str, image_b64: Optional[str] = None) -> str:
+    def _call_llm_with_fallback(
+        self, prompt: str, fallback_response: str, image_b64: Optional[str] = None, mime_type: str = "image/jpeg"
+    ) -> str:
+        """Uses the LLM when configured; otherwise (or on failure) returns a template answer built from the extracted data."""
         if self.use_real_llm:
             try:
-                inputs = [prompt]
-                if image_b64:
-                    image_bytes = base64.b64decode(image_b64)
-                    inputs.append({"mime_type": "image/jpeg", "data": image_bytes})
-                response = self.model.generate_content(inputs)
-                return response.text.strip()
+                return llm_client.generate(prompt, image_b64=image_b64, mime_type=mime_type)
             except Exception as e:
-                print(f"[{self.name}] LLM invocation failed: {e}. Using rule-based fallback.")
+                print(f"[{self.name}] LLM invocation failed: {e}. Using template fallback.")
         return fallback_response
 
 
@@ -59,7 +49,7 @@ class VisionAgent(BaseAgent):
         fallback_text = (
             f"**Multimodal Vision Analysis for {company} ({doc_type}):**\n\n"
             f"{insight_list}\n\n"
-            f"The visual analysis engine confirmed clear graphical layout hierarchy and consistent metric presentation."
+            f"(These insights were computed from the extracted KPI table; set GEMINI_API_KEY for vision-model answers.)"
         )
 
         prompt = f"""
@@ -75,7 +65,7 @@ class VisionAgent(BaseAgent):
         """
         
         log_cb(f"[{self.name}] Synthesizing visual chart trend lines and graphical highlights.")
-        return self._call_llm_with_fallback(prompt, fallback_text, image_b64)
+        return self._call_llm_with_fallback(prompt, fallback_text, image_b64, context.get("mime_type", "image/jpeg"))
 
 
 class KPIAgent(BaseAgent):
@@ -94,8 +84,8 @@ class KPIAgent(BaseAgent):
         next_period = context.get("next_period", "Next Quarter")
         image_b64 = context.get("image_b64")
 
-        hist_rev = ", ".join([f"{item['period']}: ${item['revenue']}M" for item in historical]) if historical else "N/A"
-        hist_net = ", ".join([f"{item['period']}: ${item['net_income']}M" for item in historical]) if historical else "N/A"
+        hist_rev = ", ".join(f"{item['period']}: ${item['revenue']}M" for item in historical) or "N/A"
+        hist_net = ", ".join(f"{item['period']}: ${item['net_income']}M" for item in historical if item.get("net_income") is not None) or "N/A"
         
         fc_rev = forecasts.get("revenue", {}).get("predicted", 0.0)
         slope_rev = forecasts.get("revenue", {}).get("trend_slope", 0.0)
@@ -107,7 +97,9 @@ class KPIAgent(BaseAgent):
         fallback_text = (
             f"According to the verified files for **{company}**, the historical revenue sequence displays: {hist_rev}.\n\n"
             f"Our predictive data science model forecasts the next period (**{next_period}**) revenue to be **${fc_rev}M** "
-            f"(showing a {trend_rev} trend slope of {slope_rev}). Net income is projected to reach **${fc_net}M** for the same period."
+            f"(showing a {trend_rev} trend slope of {slope_rev}; 95% prediction interval "
+            f"${forecasts.get('revenue', {}).get('lower_95')}M to ${forecasts.get('revenue', {}).get('upper_95')}M). "
+            f"Net income is projected at **${fc_net}M** for the same period."
         )
 
         prompt = f"""
@@ -125,7 +117,7 @@ class KPIAgent(BaseAgent):
         """
         
         log_cb(f"[{self.name}] Compiling regression and forecasting indicators.")
-        return self._call_llm_with_fallback(prompt, fallback_text, image_b64)
+        return self._call_llm_with_fallback(prompt, fallback_text, image_b64, context.get("mime_type", "image/jpeg"))
 
 
 class RiskAgent(BaseAgent):
@@ -159,7 +151,7 @@ class RiskAgent(BaseAgent):
         """
         
         log_cb(f"[{self.name}] Classifying risk vectors and compiling remediation notes.")
-        return self._call_llm_with_fallback(prompt, fallback_text, image_b64)
+        return self._call_llm_with_fallback(prompt, fallback_text, image_b64, context.get("mime_type", "image/jpeg"))
 
 
 class SentimentAgent(BaseAgent):
@@ -197,7 +189,7 @@ class SentimentAgent(BaseAgent):
         """
         
         log_cb(f"[{self.name}] Contextualizing qualitative CEO statements.")
-        return self._call_llm_with_fallback(prompt, fallback_text, image_b64)
+        return self._call_llm_with_fallback(prompt, fallback_text, image_b64, context.get("mime_type", "image/jpeg"))
 
 
 class OrchestratorAgent:
@@ -210,13 +202,12 @@ class OrchestratorAgent:
         self.risk_agent = RiskAgent()
         self.sentiment_agent = SentimentAgent()
         self.vision_agent = VisionAgent()
-        
-        self.api_key = os.getenv("GEMINI_API_KEY")
-        self.use_real_llm = bool(self.api_key and self.api_key.strip())
-        
-        if self.use_real_llm:
-            genai.configure(api_key=self.api_key)
-            self.model = genai.GenerativeModel("gemini-1.5-flash")
+        self.use_real_llm = llm_client.is_enabled()
+
+    @staticmethod
+    def _mentions(query: str, keywords: List[str]) -> bool:
+        """Whole-word match allowing simple inflections (risks, forecasted), so 'see' does not fire on 'seems'."""
+        return any(re.search(rf"\b{re.escape(k)}(?:s|es|ed|ing)?\b", query) for k in keywords)
 
     def coordinate(self, query: str, context: Dict[str, Any]) -> Tuple[str, List[str]]:
         """
@@ -238,19 +229,19 @@ class OrchestratorAgent:
         log("Evaluating multimodal routing intent...")
         
         # Check for visual / image queries
-        if any(w in query_lower for w in ["visual", "image", "chart", "graphic", "diagram", "table", "picture", "look", "see", "ocr"]):
+        if self._mentions(query_lower, ["visual", "image", "chart", "graphic", "diagram", "table", "picture", "look", "see", "ocr"]):
             active_agents.append(self.vision_agent)
             log("Routed target scope: Multimodal Vision Agent (active)")
             
-        if any(w in query_lower for w in ["revenue", "profit", "net income", "margin", "forecast", "projection", "predict", "eps", "growth"]):
+        if self._mentions(query_lower, ["revenue", "profit", "net income", "margin", "forecast", "projection", "predict", "eps", "growth"]):
             active_agents.append(self.kpi_agent)
             log("Routed target scope: KPI Analytics Agent (active)")
             
-        if any(w in query_lower for w in ["risk", "headwind", "challenge", "competitor", "disruption", "threat"]):
+        if self._mentions(query_lower, ["risk", "headwind", "challenge", "competitor", "disruption", "threat"]):
             active_agents.append(self.risk_agent)
             log("Routed target scope: Risk Specialist Agent (active)")
             
-        if any(w in query_lower for w in ["sentiment", "tone", "ceo", "perspective", "opinion", "statement", "executive"]):
+        if self._mentions(query_lower, ["sentiment", "tone", "ceo", "perspective", "opinion", "statement", "executive"]):
             active_agents.append(self.sentiment_agent)
             log("Routed target scope: Sentiment Analyst Agent (active)")
             
@@ -297,8 +288,7 @@ class OrchestratorAgent:
             
             if self.use_real_llm:
                 try:
-                    res = self.model.generate_content(prompt)
-                    final_response = res.text.strip()
+                    final_response = llm_client.generate(prompt)
                     log("Completed response synthesis (Consolidated Multimodal LLM output).")
                 except Exception as e:
                     print(f"[Orchestrator] Consolidated LLM failed: {e}")

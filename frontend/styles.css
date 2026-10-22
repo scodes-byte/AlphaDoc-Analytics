@@ -731,3 +731,11 @@ body {
         align-items: flex-start;
     }
 }
+
+/* Data provenance line under the upload status */
+.provenance {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.75rem;
+    color: #9ca3af;
+}

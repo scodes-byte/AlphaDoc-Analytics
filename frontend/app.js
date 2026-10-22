@@ -4,7 +4,8 @@
 
 document.addEventListener("DOMContentLoaded", () => {
     // API Configuration
-    const API_BASE_URL = "http://127.0.0.1:8000";
+    // Same origin when FastAPI serves the UI; the separate static server (port 8080) or file:// talks to the local API
+    const API_BASE_URL = (window.location.protocol === "file:" || window.location.port === "8080") ? "http://127.0.0.1:8000" : "";
 
     // DOM Elements
     const dropzone = document.getElementById("dropzone");
@@ -42,6 +43,13 @@ document.addEventListener("DOMContentLoaded", () => {
     // Global Chart Instance Reference
     let kpiChart = null;
 
+    // Show whether answers come from Gemini or from the offline parsers
+    const llmBadge = document.getElementById("llm-badge");
+    fetch(`${API_BASE_URL}/api/health`)
+        .then(r => r.json())
+        .then(h => { llmBadge.innerText = h.llm_enabled ? `🤖 LLM: ${h.llm_model}` : "⚙️ Offline mode (rule-based parser)"; })
+        .catch(() => { llmBadge.innerText = "⚠️ Backend not reachable"; });
+
     // --- Drag & Drop Handlers ---
     dropzone.addEventListener("click", () => fileInput.click());
 
@@ -73,13 +81,16 @@ document.addEventListener("DOMContentLoaded", () => {
         setLoadingState(true, "Extracting multimodal demo records...");
         try {
             const response = await fetch(`${API_BASE_URL}/api/demo`);
-            if (!response.ok) throw new Error("Demo loader returned connection issue.");
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.detail || `Demo loader returned HTTP ${response.status}`);
+            }
             const data = await response.json();
             updateDashboard(data);
             addSystemChatMessage("Multimodal Demo Analysis loaded. You can now chat with the Multi-Agent Vision and KPI Network.");
         } catch (error) {
             setLoadingState(false);
-            uploadStatus.innerHTML = `<span style="color: var(--accent);">Failed to load demo data: ${error.message}. Is backend FastAPI running?</span>`;
+            uploadStatus.innerHTML = `<span style="color: var(--accent);">Failed to load demo data: ${escapeHTML(error.message)}. Is the FastAPI backend running?</span>`;
         }
     });
 
@@ -103,8 +114,8 @@ document.addEventListener("DOMContentLoaded", () => {
             });
             
             if (!response.ok) {
-                const errData = await response.json();
-                throw new Error(errData.detail || "Server pipeline error");
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.detail || `Server pipeline error (HTTP ${response.status})`);
             }
             
             const data = await response.json();
@@ -112,7 +123,7 @@ document.addEventListener("DOMContentLoaded", () => {
             addSystemChatMessage(`Successfully ingested ${file.name} (${data.document_type.toUpperCase()} modality). Multi-Agent network is ready.`);
         } catch (error) {
             setLoadingState(false);
-            uploadStatus.innerHTML = `<span style="color: var(--accent);">Processing Failed: ${error.message}</span>`;
+            uploadStatus.innerHTML = `<span style="color: var(--accent);">Processing Failed: ${escapeHTML(error.message)}</span>`;
         }
     }
 
@@ -163,9 +174,10 @@ document.addEventListener("DOMContentLoaded", () => {
                 body: JSON.stringify({ message: query })
             });
             const data = await response.json();
+            if (!response.ok) throw new Error(data.detail || `HTTP ${response.status}`);
             addSystemChatMessage(data.response, data.thought_log);
         } catch (error) {
-            addSystemChatMessage("Failed to retrieve query response. Verify server status.");
+            addSystemChatMessage(`Failed to retrieve a response: ${error.message}`);
         } finally {
             chatInput.disabled = false;
             btnSendChat.disabled = false;
@@ -209,7 +221,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Helper: basic string sanitization
     function escapeHTML(str) {
-        return str.replace(/[&<>'"]/g, 
+        return String(str ?? "").replace(/[&<>'"]/g, 
             tag => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[tag] || tag)
         );
     }
@@ -226,7 +238,11 @@ document.addEventListener("DOMContentLoaded", () => {
     function updateDashboard(data) {
         setLoadingState(false);
         const docTypeTag = (data.document_type || "pdf").toUpperCase();
-        uploadStatus.innerHTML = `<span style="color: var(--secondary);">✓ Multimodal Analysis Complete [Modality: ${docTypeTag}]</span>`;
+        const mode = data.extraction_mode || {};
+        const grounding = mode.kpi_values_found_in_source_text;
+        uploadStatus.innerHTML = `<span style="color: var(--secondary);">✓ Analysis complete [${docTypeTag}]</span>
+            <span class="provenance">KPIs: ${escapeHTML(mode.kpis)} · Narrative: ${escapeHTML(mode.narrative)}${
+            grounding != null ? ` · ${Math.round(grounding * 100)}% of KPI values found verbatim in source` : ""}</span>`;
         
         // 1. Metadata
         metaCompany.innerText = data.company_name;
@@ -244,7 +260,8 @@ document.addEventListener("DOMContentLoaded", () => {
         metaSentiment.innerText = `${sentimentInfo.classification} (${sentimentInfo.score})`;
         
         metaSentiment.className = "meta-val sentiment-badge";
-        if (sentimentInfo.classification.toLowerCase().includes("optimistic") || sentimentInfo.classification.toLowerCase().includes("positive")) {
+        const tone = (sentimentInfo.classification || "").toLowerCase();
+        if (tone.includes("optimistic") || tone.includes("positive")) {
             metaSentiment.style.borderColor = "rgba(16, 185, 129, 0.4)";
             metaSentiment.style.color = "var(--secondary)";
             metaSentiment.style.background = "var(--secondary-glow)";
@@ -278,28 +295,37 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // 4. KPI Cards
         const lastHist = data.historical[data.historical.length - 1];
+        const fc = data.forecasts || {};
+        const fmt = (v, suffix = "") => (v === null || v === undefined ? "n/a" : `${v.toLocaleString()}${suffix}`);
+        const growth = (g) => (g === null || g === undefined ? "n/a QoQ" : `${g >= 0 ? '▲' : '▼'} ${Math.abs(g)}% QoQ`);
+        const slope = (f) => (f ? `Slope: ${f.trend_slope >= 0 ? '+' : ''}${f.trend_slope} · R² ${f.r_squared}` : "Slope: n/a");
         
         // Revenue Card
-        kpiRevVal.innerText = `$${lastHist.revenue}M`;
-        kpiRevChange.innerText = `${lastHist.revenue_growth_qoq >= 0 ? '▲' : '▼'} ${Math.abs(lastHist.revenue_growth_qoq)}% QoQ`;
-        kpiRevChange.style.color = lastHist.revenue_growth_qoq >= 0 ? "var(--secondary)" : "var(--accent)";
-        kpiRevProj.innerText = `$${data.forecasts.revenue.predicted}M`;
-        kpiRevTrend.innerText = `Slope: ${data.forecasts.revenue.trend_slope >= 0 ? '+' : ''}${data.forecasts.revenue.trend_slope}`;
+        kpiRevVal.innerText = `$${fmt(lastHist.revenue)}M`;
+        kpiRevChange.innerText = growth(lastHist.revenue_growth_qoq);
+        kpiRevChange.style.color = (lastHist.revenue_growth_qoq ?? 0) >= 0 ? "var(--secondary)" : "var(--accent)";
+        kpiRevProj.innerText = fc.revenue ? `$${fmt(fc.revenue.predicted)}M` : "n/a";
+        kpiRevTrend.innerText = slope(fc.revenue);
 
         // Operating Margin Card
-        kpiMarginVal.innerText = `${lastHist.operating_margin}%`;
-        const marginDiff = (lastHist.operating_margin - data.historical[0].operating_margin).toFixed(1);
-        kpiMarginChange.innerText = `${marginDiff >= 0 ? '▲' : '▼'} ${Math.abs(marginDiff)}% delta`;
-        kpiMarginChange.style.color = marginDiff >= 0 ? "var(--secondary)" : "var(--accent)";
-        kpiMarginProj.innerText = `${data.forecasts.operating_margin.predicted}%`;
-        kpiMarginTrend.innerText = `Slope: ${data.forecasts.operating_margin.trend_slope >= 0 ? '+' : ''}${data.forecasts.operating_margin.trend_slope}`;
+        kpiMarginVal.innerText = fmt(lastHist.operating_margin, "%");
+        const firstMargin = data.historical[0].operating_margin;
+        if (lastHist.operating_margin != null && firstMargin != null) {
+            const marginDiff = lastHist.operating_margin - firstMargin;
+            kpiMarginChange.innerText = `${marginDiff >= 0 ? '▲' : '▼'} ${Math.abs(marginDiff).toFixed(1)} pts since ${data.historical[0].period}`;
+            kpiMarginChange.style.color = marginDiff >= 0 ? "var(--secondary)" : "var(--accent)";
+        } else {
+            kpiMarginChange.innerText = "n/a";
+        }
+        kpiMarginProj.innerText = fc.operating_margin ? fmt(fc.operating_margin.predicted, "%") : "n/a";
+        kpiMarginTrend.innerText = slope(fc.operating_margin);
 
         // Net Income Card
-        kpiNetVal.innerText = `$${lastHist.net_income}M`;
-        kpiNetChange.innerText = `${lastHist.net_income_growth_qoq >= 0 ? '▲' : '▼'} ${Math.abs(lastHist.net_income_growth_qoq)}% QoQ`;
-        kpiNetChange.style.color = lastHist.net_income_growth_qoq >= 0 ? "var(--secondary)" : "var(--accent)";
-        kpiNetProj.innerText = `$${data.forecasts.net_income.predicted}M`;
-        kpiNetTrend.innerText = `Slope: ${data.forecasts.net_income.trend_slope >= 0 ? '+' : ''}${data.forecasts.net_income.trend_slope}`;
+        kpiNetVal.innerText = `$${fmt(lastHist.net_income)}M`;
+        kpiNetChange.innerText = growth(lastHist.net_income_growth_qoq);
+        kpiNetChange.style.color = (lastHist.net_income_growth_qoq ?? 0) >= 0 ? "var(--secondary)" : "var(--accent)";
+        kpiNetProj.innerText = fc.net_income ? `$${fmt(fc.net_income.predicted)}M` : "n/a";
+        kpiNetTrend.innerText = slope(fc.net_income);
 
         // 5. Render Chart
         renderVisualCharts(data);
@@ -324,9 +350,9 @@ document.addEventListener("DOMContentLoaded", () => {
         const netHist = data.historical.map(item => item.net_income);
         const marginHist = data.historical.map(item => item.operating_margin);
 
-        const revForecastSeries = [...revHist.map(() => null), data.forecasts.revenue.predicted];
-        const netForecastSeries = [...netHist.map(() => null), data.forecasts.net_income.predicted];
-        const marginForecastSeries = [...marginHist.map(() => null), data.forecasts.operating_margin.predicted];
+        const fc = data.forecasts || {};
+        const revForecastSeries = [...revHist.map(() => null), fc.revenue ? fc.revenue.predicted : null];
+        const netForecastSeries = [...netHist.map(() => null), fc.net_income ? fc.net_income.predicted : null];
 
         kpiChart = new Chart(ctx, {
             type: "bar",
@@ -409,8 +435,10 @@ document.addEventListener("DOMContentLoaded", () => {
                                 }
                                 if (context.parsed.y !== null) {
                                     label += context.parsed.y;
-                                    if (context.dataIndex === labels.length - 1 && context.datasetIndex === 1) {
-                                        label += ` (95% CI: $${data.forecasts.revenue.lower_95}M - $${data.forecasts.revenue.upper_95}M)`;
+                                    const isForecast = context.dataIndex === labels.length - 1;
+                                    const series = context.datasetIndex === 1 ? fc.revenue : context.datasetIndex === 3 ? fc.net_income : null;
+                                    if (isForecast && series) {
+                                        label += ` (95% prediction interval: $${series.lower_95}M to $${series.upper_95}M)`;
                                     }
                                 }
                                 return label;
@@ -444,8 +472,7 @@ document.addEventListener("DOMContentLoaded", () => {
                             text: "Operating Margin (%)",
                             color: "#9ca3af"
                         },
-                        min: 0,
-                        max: 100
+                        suggestedMin: 0
                     }
                 }
             }
